@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Flexbox Task Board — Exercise</title>
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body>
+    <div class="app" id="app">
+      <header class="app-header" aria-label="App header">
+        <div class="brand">
+          <div class="logo" aria-hidden="true">FB</div>
+          <div>
+            <h1>FlexBoard — Tile & Task Practice</h1>
+            <p class="lead">Practice Flexbox layout + DOM manipulation</p>
+          </div>
+        </div>
+
+        <div class="controls" role="region" aria-label="controls">
+          <div class="new-task" role="form" aria-label="new task form">
+            <input
+              id="taskText"
+              type="text"
+              placeholder="Add a task, e.g. 'Fix shower tile'"
+            />
+            <button id="addBtn" class="btn" aria-label="Add task">Add</button>
+          </div>
+
+          <div class="filters" aria-label="filters">
+            <button class="chip active" data-filter="all">All</button>
+            <button class="chip" data-filter="todo">To do</button>
+            <button class="chip" data-filter="done">Done</button>
+          </div>
+        </div>
+      </header>
+
+      <main>
+        <section class="board" id="board" aria-label="task board">
+          <!-- Columns: To do | In progress | Done -->
+          <div class="column" data-col="todo" aria-label="To do column">
+            <div class="column-header">
+              <span class="col-title">To do</span>
+              <span class="col-count" id="count-todo">0</span>
+            </div>
+            <div class="col-body" id="col-todo" aria-live="polite"></div>
+          </div>
+
+          <div class="column" data-col="inprogress">
+            <div class="column-header">
+              <span class="col-title">In progress</span>
+              <span class="col-count" id="count-inprogress">0</span>
+            </div>
+            <div class="col-body" id="col-inprogress"></div>
+          </div>
+
+          <div class="column" data-col="done">
+            <div class="column-header">
+              <span class="col-title">Done</span>
+              <span class="col-count" id="count-done">0</span>
+            </div>
+            <div class="col-body" id="col-done"></div>
+          </div>
+        </section>
+      </main>
+
+      <footer
+        style="
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        "
+      >
+        <small style="color: var(--muted)"
+          >Tip: Use the filter chips or drag cards (optional) to
+          reorganize.</small
+        >
+        <div style="display: flex; gap: 8px; align-items: center">
+          <button id="clearBtn" class="btn ghost">Clear All</button>
+          <button id="seedBtn" class="btn ghost">Seed Example</button>
+        </div>
+      </footer>
+    </div>
+
+    <script>
+      /*
+  Flexboard JS starter: practice DOM manipulation.
+  Features implemented:
+   - Add task (default column: todo)
+   - Move task between columns (buttons)
+   - Mark complete (move to done)
+   - Edit & delete (inline edit)
+   - Filters (all/todo/done) client-side
+   - Persist to localStorage
+   - Event delegation pattern (single listener on board)
+*/
+
+      const storageKey = "flexboard.tasks.v1";
+      const board = document.getElementById("board");
+      const colBodies = {
+        todo: document.getElementById("col-todo"),
+        inprogress: document.getElementById("col-inprogress"),
+        done: document.getElementById("col-done"),
+      };
+      const counts = {
+        todo: document.getElementById("count-todo"),
+        inprogress: document.getElementById("count-inprogress"),
+        done: document.getElementById("count-done"),
+      };
+      const addBtn = document.getElementById("addBtn");
+      const textInput = document.getElementById("taskText");
+      const clearBtn = document.getElementById("clearBtn");
+      const seedBtn = document.getElementById("seedBtn");
+      const filterChips = document.querySelectorAll(".chip");
+
+      let tasks = loadTasks(); // array of {id,title,desc,column,created}
+
+      // ----------------- util -----------------
+      function uid() {
+        return Math.random().toString(36).slice(2, 9);
+      }
+      function saveTasks() {
+        localStorage.setItem(storageKey, JSON.stringify(tasks));
+        updateCounts();
+      }
+      function loadTasks() {
+        try {
+          const raw = localStorage.getItem(storageKey);
+          return raw ? JSON.parse(raw) : [];
+        } catch (e) {
+          return [];
+        }
+      }
+      function createCardDOM(task) {
+        const el = document.createElement("article");
+        el.className = "card" + (task.column === "done" ? " completed" : "");
+        el.setAttribute("data-id", task.id);
+        el.innerHTML = `
+    <input type="checkbox" class="icon-btn chk" aria-label="Mark complete" ${
+      task.column === "done" ? "checked" : ""
+    }>
+    <div class="meta">
+      <p class="title" tabindex="0">${escapeHtml(task.title)}</p>
+      <p class="desc">${escapeHtml(task.desc || "")}</p>
+      <small style="color:var(--muted)">${new Date(
+        task.created
+      ).toLocaleString()}</small>
+    </div>
+    <div class="actions" role="group" aria-label="card actions">
+      <button class="icon-btn move-left" title="Move left">◀</button>
+      <button class="icon-btn edit" title="Edit">✎</button>
+      <button class="icon-btn del" title="Delete" aria-label="Delete task">🗑</button>
+      <button class="icon-btn move-right" title="Move right">▶</button>
+    </div>
+  `;
+        return el;
+      }
+      function escapeHtml(s) {
+        return String(s).replace(
+          /[&<>"']/g,
+          (m) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            }[m])
+        );
+      }
+
+      // ----------------- render -----------------
+      function renderBoard(filter = "all") {
+        // clear columns
+        Object.values(colBodies).forEach((c) => (c.innerHTML = ""));
+        tasks.forEach((t) => {
+          if (
+            filter === "all" ||
+            (filter === "todo" && t.column !== "done") ||
+            (filter === "done" && t.column === "done")
+          ) {
+            colBodies[t.column].appendChild(createCardDOM(t));
+          }
+        });
+        updateCounts();
+      }
+      function updateCounts() {
+        counts.todo.textContent = tasks.filter(
+          (t) => t.column === "todo"
+        ).length;
+        counts.inprogress.textContent = tasks.filter(
+          (t) => t.column === "inprogress"
+        ).length;
+        counts.done.textContent = tasks.filter(
+          (t) => t.column === "done"
+        ).length;
+      }
+
+      // ----------------- actions -----------------
+      addBtn.addEventListener("click", () => {
+        const val = textInput.value.trim();
+        if (!val) return textInput.focus();
+        const newTask = {
+          id: uid(),
+          title: val,
+          desc: "",
+          column: "todo",
+          created: Date.now(),
+        };
+        tasks.unshift(newTask);
+        saveTasks();
+        textInput.value = "";
+        renderBoard(getActiveFilter());
+      });
+
+      textInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") addBtn.click();
+      });
+
+      clearBtn.addEventListener("click", () => {
+        if (!confirm("Clear all tasks?")) return;
+        tasks = [];
+        saveTasks();
+        renderBoard(getActiveFilter());
+      });
+
+      seedBtn.addEventListener("click", () => {
+        const examples = [
+          {
+            id: uid(),
+            title: "Remove old shower taps",
+            desc: "Prepare the wall and cap pipes",
+            column: "todo",
+            created: Date.now() - 1000 * 60 * 60,
+          },
+          {
+            id: uid(),
+            title: "Order Villaboard sheets",
+            desc: "3 sheets 1200x3600",
+            column: "inprogress",
+            created: Date.now() - 1000 * 60 * 30,
+          },
+          {
+            id: uid(),
+            title: "Tile shower floor",
+            desc: "Use 600x600 grid, slope 1:80",
+            column: "done",
+            created: Date.now() - 1000 * 60 * 60 * 8,
+          },
+        ];
+        tasks = examples.concat(tasks);
+        saveTasks();
+        renderBoard(getActiveFilter());
+      });
+
+      // Event delegation for card actions
+      board.addEventListener("click", (ev) => {
+        const card = ev.target.closest(".card");
+        if (!card) return;
+        const id = card.getAttribute("data-id");
+        const task = tasks.find((t) => t.id === id);
+        if (!task) return;
+
+        if (ev.target.matches(".del")) {
+          tasks = tasks.filter((t) => t.id !== id);
+          saveTasks();
+          renderBoard(getActiveFilter());
+          return;
+        }
+        if (ev.target.matches(".edit")) {
+          const newTitle = prompt("Edit task title", task.title);
+          if (newTitle !== null) {
+            task.title = newTitle.trim();
+            saveTasks();
+            renderBoard(getActiveFilter());
+          }
+          return;
+        }
+        if (ev.target.matches(".move-left")) {
+          task.column = moveLeft(task.column);
+          saveTasks();
+          renderBoard(getActiveFilter());
+          return;
+        }
+        if (ev.target.matches(".move-right")) {
+          task.column = moveRight(task.column);
+          saveTasks();
+          renderBoard(getActiveFilter());
+          return;
+        }
+        if (ev.target.matches(".chk")) {
+          // toggle done
+          task.column = task.column === "done" ? "todo" : "done";
+          saveTasks();
+          renderBoard(getActiveFilter());
+          return;
+        }
+      });
+
+      // keyboard accessibility: allow Enter to edit title when focused
+      board.addEventListener("keydown", (ev) => {
+        if (ev.target.classList.contains("title") && ev.key === "Enter") {
+          ev.preventDefault();
+          ev.target.closest(".card").querySelector(".edit").click();
+        }
+      });
+
+      // filters
+      filterChips.forEach((chip) => {
+        chip.addEventListener("click", () => {
+          filterChips.forEach((c) => c.classList.remove("active"));
+          chip.classList.add("active");
+          renderBoard(getActiveFilter());
+        });
+      });
+      function getActiveFilter() {
+        return document.querySelector(".chip.active").dataset.filter || "all";
+      }
+
+      // helpers to move columns
+      function moveLeft(col) {
+        if (col === "inprogress") return "todo";
+        if (col === "done") return "inprogress";
+        return "todo";
+      }
+      function moveRight(col) {
+        if (col === "todo") return "inprogress";
+        if (col === "inprogress") return "done";
+        return "done";
+      }
+
+      // initial render
+      renderBoard();
+    </script>
+  </body>
+</html>
